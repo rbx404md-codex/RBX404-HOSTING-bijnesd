@@ -2,6 +2,7 @@
 # Scheduled tasks.
 
 import logging
+from time import time
 from datetime import datetime, timezone
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
@@ -11,6 +12,7 @@ from db import get_db, sql as qs
 
 log = logging.getLogger("rbx404.jobs")
 LOW_STOCK_THRESHOLD = 3
+_LOW_STOCK_LAST_ALERT = 0.0
 
 
 async def job_release_referrals(ctx: ContextTypes.DEFAULT_TYPE):
@@ -48,6 +50,10 @@ async def job_release_referrals(ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def job_low_stock(ctx: ContextTypes.DEFAULT_TYPE):
+    global _LOW_STOCK_LAST_ALERT
+    now = time()
+    if now - _LOW_STOCK_LAST_ALERT < 3 * 3600:
+        return
     async with get_db() as db:
         cur = await db.execute(qs(
             "SELECT plan, COUNT(*) FROM accounts WHERE status='ACTIVE' GROUP BY plan"
@@ -56,6 +62,7 @@ async def job_low_stock(ctx: ContextTypes.DEFAULT_TYPE):
     low = [p for p in PRICING if stock.get(p, 0) < LOW_STOCK_THRESHOLD]
     if not low:
         return
+    _LOW_STOCK_LAST_ALERT = now
     text = "📉 <b>Low stock</b>\n" + "\n".join(
         f"• {PRICING[p]['label']}: {stock.get(p, 0)} left" for p in low
     )
