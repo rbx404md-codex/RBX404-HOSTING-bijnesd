@@ -2,6 +2,7 @@
 # User-facing UI: keyboards, callbacks, delivery.
 
 from datetime import datetime, timezone, timedelta
+from html import escape as esc
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
@@ -65,7 +66,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await _ensure_force_join(update, ctx):
         return
     u = update.effective_user
-    # handle referral deep-link
+
+    # referral deep-link handling
     if ctx.args and ctx.args[0].startswith("ref_"):
         try:
             referrer = int(ctx.args[0][4:])
@@ -78,11 +80,15 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 if not exists:
                     now = datetime.now(timezone.utc)
                     eligible = (now + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-                    await db.execute(qs("""
-                        INSERT INTO referrals(referrer_id, referee_id, eligible_at)
-                        VALUES (?,?,?)
-                    """), (referrer, u.id, eligible))
-                    await db.commit()
+                    try:
+                        await db.execute(qs("""
+                            INSERT INTO referrals(referrer_id, referee_id, eligible_at)
+                            VALUES (?,?,?)
+                        """), (referrer, u.id, eligible))
+                        await db.commit()
+                    except Exception:
+                        pass
+
     async with get_db() as db:
         await db.execute(qs("""
             INSERT INTO users(user_id, username, first_name, last_seen)
@@ -91,8 +97,10 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 username=excluded.username, first_name=excluded.first_name
         """), (u.id, u.username or "", u.first_name or ""))
         await db.commit()
+
+    safe_name = esc(u.first_name or "there")
     await update.message.reply_text(
-        f"🔒 <b>RBX404 VPN Premium Store</b>\n\nWelcome, {u.first_name}!",
+        f"🔒 <b>RBX404 VPN Premium Store</b>\n\nWelcome, {safe_name}!",
         parse_mode=ParseMode.HTML, reply_markup=kb_main(),
     )
 
@@ -124,10 +132,10 @@ async def cb_router(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["reserved"] = acct["id"]
         p = PRICING[plan]
         preview = (
-            f"📧 Email: <code>{acct['email']}</code>\n"
-            f"🌍 Country: {acct['country']}\n"
+            f"📧 Email: <code>{esc(acct['email'])}</code>\n"
+            f"🌍 Country: {esc(acct['country'])}\n"
             f"📅 Plan: {p['label']}\n"
-            f"⏳ Expires: {acct['expire_date']}\n"
+            f"⏳ Expires: {esc(acct['expire_date'])}\n"
             f"💰 Price: {p['bdt']}৳ / {p['stars']}⭐\n\nChoose payment:"
         )
         kb = InlineKeyboardMarkup([
@@ -161,8 +169,8 @@ async def cb_router(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         now = datetime.now(timezone.utc)
         for r in rows:
             line = (
-                f"#{r['id']} · {r['email']}\n"
-                f"Plan: {r['plan']} · Expires: {r['expire_date']}\n"
+                f"#{r['id']} · {esc(r['email'])}\n"
+                f"Plan: {r['plan']} · Expires: {esc(str(r['expire_date']))}\n"
                 f"Status: {r['status']}"
             )
             kb_rows = []
@@ -193,7 +201,7 @@ async def cb_router(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"🎁 <b>Referral</b>\n"
             f"Invite friends — earn <b>{REFERRAL_STARS}⭐</b> per verified join.\n"
             f"Bonus releases after invitee stays in channel 7 days.\n\n"
-            f"Your link: <code>{link}</code>\nConfirmed referrals: <b>{n}</b>",
+            f"Your link: <code>{esc(link)}</code>\nConfirmed referrals: <b>{n}</b>",
             parse_mode=ParseMode.HTML, reply_markup=kb_main(),
         )
         return
@@ -237,18 +245,18 @@ async def deliver_credentials(ctx, user_id: int, account: dict,
     ovpn_path = generate_ovpn(account)
     msg = (
         f"✅ <b>Account Delivered!</b>\n\n"
-        f"📧 Email: <code>{account['email']}</code>\n"
-        f"🔑 Password: <code>{account['password']}</code>\n"
+        f"📧 Email: <code>{esc(account['email'])}</code>\n"
+        f"🔑 Password: <code>{esc(account['password'])}</code>\n"
         f"━━━━━━━━━━━━━━━\n"
         f"🔒 <b>VPN Credentials:</b>\n"
-        f"👤 OVPN User: <code>{account['ovpn_user']}</code>\n"
-        f"🔐 OVPN Pass: <code>{account['ovpn_pass']}</code>\n\n"
-        f"📅 Expires: {account['expire_date']}\n"
+        f"👤 OVPN User: <code>{esc(account['ovpn_user'])}</code>\n"
+        f"🔐 OVPN Pass: <code>{esc(account['ovpn_pass'])}</code>\n\n"
+        f"📅 Expires: {esc(str(account['expire_date']))}\n"
         f"⏳ Days Left: {account['days_left']}\n"
         f"📋 Plan: {p['label']}\n"
-        f"⚡ Status: {account['status']}\n"
-        f"🔑 License: <code>{account.get('license') or '-'}</code>\n"
-        f"📡 PPTP: <code>{account.get('pptp') or '-'}</code>\n"
+        f"⚡ Status: {esc(account['status'])}\n"
+        f"🔑 License: <code>{esc(account.get('license') or '-')}</code>\n"
+        f"📡 PPTP: <code>{esc(account.get('pptp') or '-')}</code>\n"
         f"━━━━━━━━━━━━━━━\n"
         f"📱 <b>Setup:</b>\n"
         f"1. Install OpenVPN Connect\n"
@@ -257,7 +265,7 @@ async def deliver_credentials(ctx, user_id: int, account: dict,
         f"4. Connect ✅\n\n"
         f"⚠️ Warranty: {WARRANTY_DAYS} days replacement\n"
         f"📞 Support: @RBX404\n\n"
-        f"🧾 <i>Order #{order_id} · paid via {payment} · no refund on digital goods</i>"
+        f"🧾 <i>Order #{order_id} · paid via {esc(payment)} · no refund on digital goods</i>"
     )
     with open(ovpn_path, "rb") as f:
         await ctx.bot.send_document(
