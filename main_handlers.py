@@ -1,8 +1,10 @@
 # main_handlers.py
 # Single source of handler registration.
 
+import logging
 from datetime import time as dtime
 from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import (
     CommandHandler, CallbackQueryHandler, MessageHandler,
     PreCheckoutQueryHandler, filters,
@@ -11,7 +13,7 @@ from telegram.ext import (
 from ui_user import cmd_start, cb_router
 from payment import (
     pre_checkout, successful_payment, manual_cash_prompt,
-    admin_approve, admin_reject, send_stars_invoice,
+    admin_approve, admin_reject, send_stars_invoice, handle_trxid,
 )
 from admin import (
     cmd_admin, cmd_import, cmd_broadcast, cmd_promo, cmd_runjob, cb_admin,
@@ -34,6 +36,8 @@ from admin_views import (
 from db import get_db, sql as qs
 from config import DB_PATH, USE_POSTGRES
 
+log = logging.getLogger("rbx404.errors")
+
 
 async def cmd_stock(update: Update, ctx):
     s = await stock_by_plan()
@@ -44,7 +48,6 @@ async def cmd_stock(update: Update, ctx):
 
 async def on_text(update: Update, ctx):
     if await collect_import(update, ctx):         return
-    from payment import handle_trxid
     if await handle_trxid(update, ctx):           return
     if await handle_warranty_reason(update, ctx): return
     if await handle_ticket_body(update, ctx):     return
@@ -53,7 +56,6 @@ async def on_text(update: Update, ctx):
 
 
 async def cb_payment_branch(update: Update, ctx):
-    import aiosqlite
     q = update.callback_query
     await q.answer()
     data = q.data or ""
@@ -77,6 +79,19 @@ async def cb_payment_branch(update: Update, ctx):
         await admin_approve(update, ctx); return
     if data.startswith("rej:"):
         await admin_reject(update, ctx); return
+
+
+async def on_error(update: object, ctx) -> None:
+    """Global error handler — logs and tells the user (if we can)."""
+    log.exception("handler error: %s", ctx.error)
+    if isinstance(update, Update):
+        try:
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    "⚠️ Something went wrong. Try /start again."
+                )
+        except TelegramError:
+            pass
 
 
 def register_handlers(app):
@@ -114,6 +129,9 @@ def register_handlers(app):
     app.add_handler(CallbackQueryHandler(cb_router))  # catch-all, MUST be last
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+
+    # errors
+    app.add_error_handler(on_error)
 
     schedule_jobs(app)
 
