@@ -1,0 +1,62 @@
+services:
+  bot:
+    build: .
+    image: rbx404-vpn-bot:latest
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./backups:/app/backups
+      - ./ovpn:/app/ovpn:ro
+    expose:
+      - "8080"
+    networks: [rbxnet]
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - bot
+    networks: [rbxnet]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: ["pg"]
+    environment:
+      POSTGRES_USER: rbx
+      POSTGRES_PASSWORD: ${RBX404_PG_PASSWORD:-changeme}
+      POSTGRES_DB: rbx404
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks: [rbxnet]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rbx -d rbx404"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  rbxnet:
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pg_data:
